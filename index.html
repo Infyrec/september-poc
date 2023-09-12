@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PoC - Infyrec Research</title>
+</head>
+<style>
+    video{
+        width: 400px;
+        height: 200px;
+    }
+</style>
+<body>
+    <h1>PoC for Storing Chunks in Indexed DB</h1>
+    <p>PoC - Part of Self Hosting Cloud Storage Software Development Project</p>
+    <input type="file" id="file">
+    <button onclick="readDB()">Read</button>
+    <button onclick="deleteDB()">Delete DB</button>
+    <video id="video" controls></video>
+    <p>PoC By: H.Ragul</p>
+    <script>
+        let file = document.getElementById('file')
+        let chunkSize = 1024 * 1024
+        let offset = 0
+        let selectedFile
+        let TabelCount = 1
+
+        file.addEventListener('change', () => {
+            selectedFile = file.files[0]
+
+            while(offset < selectedFile.size){
+                const request = indexedDB.open('infyrec', 1)
+
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    const objectStore = db.createObjectStore('store', { autoIncrement: true });
+                };
+
+                request.onsuccess = (event) => {
+                    const db = event.target.result;
+                    let transaction = db.transaction(['store'], 'readwrite');
+                    let objectStore = transaction.objectStore('store');
+                    const request = objectStore.add(null);
+                    request.onsuccess = () => {
+                        console.log(`Tabel reserved`);
+                    };
+                    transaction.oncomplete = () => {
+                        db.close();
+                    };
+                    transaction.onerror = (error) => {
+                        console.error('Error at Reserving Tabel: ', error);
+                    };
+                    request.onerror = (event) => {
+                        console.error('Database error: ' + event.target.errorCode);
+                    };
+                };
+
+                offset += chunkSize
+            }
+
+            offset = 0
+            TabelCount = 1
+            createChunks()
+        })
+
+        async function createChunks(){
+            if(offset < selectedFile.size){
+                let chunk = selectedFile.slice(offset, offset + chunkSize)
+                let result = await chunk.arrayBuffer()
+                updateBuffer(TabelCount, result)
+            }
+        }
+
+        function updateBuffer(index, Result){
+            const request = indexedDB.open('infyrec', 1)
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                const objectStore = db.createObjectStore('store', { autoIncrement: true });
+            };
+
+            request.onsuccess = (event) => {
+                const db = event.target.result;
+                let transaction = db.transaction(['store'], 'readwrite');
+                let objectStore = transaction.objectStore('store');
+
+                let cursorRequest = objectStore.openCursor();
+
+                cursorRequest.onsuccess = function(event) {
+                    let cursor = event.target.result;
+                    
+                    if(cursor.key == index){
+                        cursor.update(Result)
+                        console.log(`Buffer placed at ${index}`);
+                        TabelCount++
+                        offset += chunkSize
+                        createChunks()
+                    }
+                    else{
+                        cursor.continue()
+                    }
+                }
+            };
+        }  
+
+        function readDB(){
+            const request = indexedDB.open('infyrec', 1)
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                const objectStore = db.createObjectStore('store', { autoIncrement: true });
+            };
+
+            request.onsuccess = (event) => {
+                const db = event.target.result;
+                let transaction = db.transaction(['store'], 'readonly');
+                let objectStore = transaction.objectStore('store');
+                let getAllRequest = objectStore.getAll();
+                getAllRequest.onsuccess = () => {
+                    document.getElementById('video').src = URL.createObjectURL(new Blob(getAllRequest.result))
+
+                    /*
+                    // To download the file
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = URL.createObjectURL(new Blob(getAllRequest.result));
+                    downloadLink.download = 'downloaded-video.mp4';
+                    downloadLink.innerText = 'Download Video';
+                    document.body.appendChild(downloadLink);
+                    */
+                };
+                getAllRequest.onerror = (error) => {
+                    console.error('Error retrieving values: ', error);
+                };
+
+                transaction.oncomplete = () => {
+                    db.close();
+                };
+                transaction.onerror = (error) => {
+                    console.error('Error reading ArrayBuffer: ', error);
+                };
+                request.onerror = (event) => {
+                    console.error('Database error: ' + event.target.errorCode);
+                };
+            };
+        }
+
+        function deleteDB(){
+            const deleteRequest = indexedDB.deleteDatabase('infyrec');
+            deleteRequest.onsuccess = () => {
+                console.log(`Database deleted successfully.`);
+            };
+
+            deleteRequest.onerror = (event) => {
+                console.error(`Error deleting database:`, event.target.error);
+            };
+        }
+    </script>
+</body>
